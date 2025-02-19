@@ -1,0 +1,165 @@
+import requests
+from bs4 import BeautifulSoup
+import tkinter as tk
+from tkinter import scrolledtext, ttk, Entry
+import pdfplumber
+import os
+import pytesseract
+from PIL import Image
+from io import BytesIO
+import webbrowser
+from googlesearch import search
+
+# 📌 Pfad zu Tesseract-OCR (Falls nicht installiert: zuerst installieren!)
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+# 📌 Slowakische Begriffe für bessere Menü-Erkennung
+menu_keywords = ["Denné menu", "Obedové menu", "Dnes na obed", "Špeciálne menu", "Polievky"]
+price_identifiers = ["€", "Eur", "EUR", "Cena"]
+
+def google_search(restaurant_name, menu_type="Denné menu"):
+    """Sucht nach der offiziellen Website & Facebook-Seite eines Restaurants"""
+    query = f"{restaurant_name} {menu_type} site:.sk"
+    results = list(search(query, num_results=5))
+
+    website, facebook_page = "", ""
+    for result in results:
+        if "facebook.com" in result:
+            facebook_page = result
+        else:
+            website = result
+        if website and facebook_page:
+            break
+
+    return website, facebook_page
+
+def scrape_menu(url):
+    """Scrapt gezielt das Menü, indem es nach Gerichten & Preisen sucht."""
+    try:
+        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        menu_data = []
+
+        # 🔍 Suche nach Menüs in <table>
+        for table in soup.find_all("table"):
+            for row in table.find_all("tr"):
+                cols = row.find_all("td")
+                menu_text = " | ".join([col.get_text(strip=True) for col in cols])
+                if any(keyword in menu_text for keyword in menu_keywords) or any(price in menu_text for price in price_identifiers):
+                    menu_data.append(menu_text)
+
+        # 🔍 Suche nach Menüs in <ul> / <li>
+        for ul in soup.find_all("ul"):
+            for li in ul.find_all("li"):
+                text = li.get_text(strip=True)
+                if any(keyword in text for keyword in menu_keywords) or any(price in text for price in price_identifiers):
+                    menu_data.append(text)
+
+        # 🔍 Suche nach Menüs in <div> und <p>, aber nur wenn ein Preis (€) enthalten ist
+        for div in soup.find_all("div"):
+            text = div.get_text(strip=True)
+            if any(price in text for price in price_identifiers):
+                menu_data.append(text)
+
+        if not menu_data:
+            return "❌ Žiadne menu sa nenašlo."
+
+        return "\n".join(menu_data)
+
+    except Exception as e:
+        return f"❌ Chyba pri načítaní stránky: {e}"
+
+def extract_text_from_pdf(pdf_url):
+    """Extrahiert Text aus einer PDF."""
+    pdf_path = "menu.pdf"
+    try:
+        response = requests.get(pdf_url, headers={"User-Agent": "Mozilla/5.0"})
+        response.raise_for_status()
+
+        with open(pdf_path, "wb") as file:
+            file.write(response.content)
+
+        text = ""
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() + "\n"
+
+        os.remove(pdf_path)
+        return "\n".join([line for line in text.split("\n") if any(price in line for price in price_identifiers)]) if text else "❌ Žiadny text v PDF nenájdený."
+
+    except Exception as e:
+        return f"❌ Chyba pri sťahovaní PDF: {e}"
+
+def extract_text_from_image(image_url):
+    """Extrahiert Text aus einem Menü-Bild (z. B. Facebook)."""
+    try:
+        response = requests.get(image_url, headers={"User-Agent": "Mozilla/5.0"})
+        response.raise_for_status()
+        img = Image.open(BytesIO(response.content))
+        text = pytesseract.image_to_string(img, lang="slk")
+        return "\n".join([line for line in text.split("\n") if any(price in line for price in price_identifiers)]) if text else "❌ Žiadny text v obrázku nenájdený."
+
+    except Exception as e:
+        return f"❌ Chyba pri načítaní obrázka: {e}"
+
+def fetch_menu():
+    """Sucht das Menü basierend auf Nutzereingabe."""
+    restaurant_name = entry_restaurant.get()
+    menu_type = entry_menu.get()
+
+    if not restaurant_name:
+        return
+
+    result_text.config(state=tk.NORMAL)
+    result_text.delete(1.0, tk.END)
+
+    website, facebook_page = google_search(restaurant_name, menu_type)
+    result_text.insert(tk.END, f"\n🔍 Hľadám '{menu_type if menu_type else 'Denné menu'}' pre {restaurant_name}...\n")
+
+    menu_data = []
+
+    if website:
+        menu_data.append(f"\n🌍 **Menü von offizieller Webseite:**\n{scrape_menu(website)}\n")
+
+    if facebook_page:
+        menu_data.append(f"\n📘 **Menü von Facebook:**\n{scrape_menu(facebook_page)}\n")
+
+    final_text = "\n".join(menu_data)
+    result_text.insert(tk.END, final_text if final_text else "❌ Žiadne Menü gefunden.")
+
+    result_text.config(state=tk.DISABLED)
+
+def fetch_contact():
+    """Sucht Kontaktinformationen und öffnet Google Maps."""
+    restaurant_name = entry_restaurant.get()
+    if not restaurant_name:
+        return
+
+    google_maps_link = f"https://www.google.com/maps/search/{restaurant_name.replace(' ', '+')}"
+    webbrowser.open(google_maps_link)
+
+# 📌 GUI mit klaren Beschriftungen
+root = tk.Tk()
+root.title("Intelligenter Menü-Sucher")
+root.geometry("900x750")
+root.configure(bg="#f5f5f5")
+
+# 📌 Eingabefelder mit Beschriftungen
+tk.Label(root, text="🔍 Restaurant:", font=("Arial", 14), bg="#f5f5f5").pack()
+entry_restaurant = Entry(root, font=("Arial", 14), width=40)
+entry_restaurant.pack(pady=5)
+
+tk.Label(root, text="🍽️ Menü-Typ (optional, z. B. 'Denné menu' oder 'Polievky'):", font=("Arial", 14), bg="#f5f5f5").pack()
+entry_menu = Entry(root, font=("Arial", 14), width=40)
+entry_menu.pack(pady=5)
+
+ttk.Button(root, text="Menü suchen", command=fetch_menu).pack(pady=10)
+ttk.Button(root, text="📍 Kontakt", command=fetch_contact).pack(pady=5)
+
+result_text = scrolledtext.ScrolledText(root, width=100, height=30, font=("Arial", 12))
+result_text.pack(padx=10, pady=10)
+result_text.config(state=tk.DISABLED)
+
+root.mainloop()

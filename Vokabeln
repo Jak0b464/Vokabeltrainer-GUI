@@ -1,0 +1,183 @@
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+import pytesseract
+from PIL import Image
+import json
+import random
+from deep_translator import GoogleTranslator
+
+# Datei für die Vokabeln
+FILE_NAME = "vokabeln.json"
+
+# Sprachen für die GUI
+languages = {
+    "de": {
+        "title": "Mein Vokabeltrainer",
+        "points": "Punkte: ",
+        "target_lang": "Zielsprache eingeben",
+        "word_input": "Wort eingeben (wird automatisch übersetzt)",
+        "translate_save": "Wort übersetzen & speichern",
+        "learn_words": "Lerne deine Wörter",
+        "press_start": "Drücke auf 'Lernen starten'",
+        "check_answer": "Antwort überprüfen",
+        "start_learning": "Lernen starten",
+        "saved_words": "Gespeicherte Vokabeln",
+        "delete_selected": "Ausgewählte Wörter löschen",
+        "warning_no_words": "Bitte Wörter zum Löschen auswählen.",
+        "no_words_added": "Bitte zuerst Wörter hinzufügen.",
+        "how_translate": "Wie übersetzt man: "
+    },
+    "en": {
+        "title": "My Vocabulary Trainer",
+        "points": "Points: ",
+        "target_lang": "Enter target language",
+        "word_input": "Enter a word (it will be translated automatically)",
+        "translate_save": "Translate & Save Word",
+        "learn_words": "Learn your words",
+        "press_start": "Press 'Start Learning'",
+        "check_answer": "Check answer",
+        "start_learning": "Start Learning",
+        "saved_words": "Saved Words",
+        "delete_selected": "Delete selected words",
+        "warning_no_words": "Please select words to delete.",
+        "no_words_added": "Please add words first.",
+        "how_translate": "How do you translate: "
+    }
+}
+
+# Aktuelle Sprache
+current_lang = "de"
+
+def switch_language(lang):
+    global current_lang
+    current_lang = lang
+    update_texts()
+
+def update_texts():
+    lang_data = languages[current_lang]
+    root.title(lang_data["title"])
+    score_label.config(text=lang_data["points"] + str(score))
+    target_lang_label.config(text=lang_data["target_lang"])
+    word_label.config(text=lang_data["word_input"])
+    translate_button.config(text=lang_data["translate_save"])
+    learn_label.config(text=lang_data["learn_words"])
+    question_label.config(text=lang_data["press_start"])
+    check_button.config(text=lang_data["check_answer"])
+    start_button.config(text=lang_data["start_learning"])
+    saved_words_label.config(text=lang_data["saved_words"])
+    delete_button.config(text=lang_data["delete_selected"])
+
+def load_vocabulary():
+    try:
+        with open(FILE_NAME, "r") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        return {}
+
+def save_vocabulary():
+    with open(FILE_NAME, "w") as file:
+        json.dump(vocabulary, file, indent=4)
+    update_vocab_table()
+
+def add_word():
+    word = word_entry.get().strip()
+    target_lang = target_lang_var.get()
+    
+    if word:
+        translated_word = GoogleTranslator(source="auto", target=target_lang).translate(word)
+        vocabulary[word] = translated_word
+        save_vocabulary()
+        word_entry.delete(0, tk.END)
+        update_vocab_table()
+
+def delete_selected_words():
+    selected_items = vocab_table.selection()
+    if not selected_items:
+        messagebox.showwarning("Hinweis", languages[current_lang]["warning_no_words"])
+        return
+    
+    for item in selected_items:
+        word = vocab_table.item(item, "values")[0]
+        if word in vocabulary:
+            del vocabulary[word]
+    
+    save_vocabulary()
+
+def delete_with_key(event):
+    delete_selected_words()
+
+def start_training():
+    global score
+    if not vocabulary:
+        messagebox.showwarning("Keine Vokabeln", languages[current_lang]["no_words_added"])
+        return
+    score = 0
+    score_label.config(text=languages[current_lang]["points"] + str(score))
+    ask_question()
+
+def ask_question():
+    global current_word
+    current_word = random.choice(list(vocabulary.keys()))
+    question_label.config(text=languages[current_lang]["how_translate"] + current_word + "?")
+    answer_entry.delete(0, tk.END)
+
+def update_vocab_table():
+    vocab_table.delete(*vocab_table.get_children())
+    for word, translation in vocabulary.items():
+        vocab_table.insert("", "end", values=(word, translation))
+
+# GUI aufbauen
+root = tk.Tk()
+root.geometry("500x600")
+root.configure(bg="#ADD8E6")
+root.resizable(True, True)
+
+# Sprachauswahl oben rechts
+menubar = tk.Menu(root)
+language_menu = tk.Menu(menubar, tearoff=0)
+language_menu.add_command(label="Deutsch", command=lambda: switch_language("de"))
+language_menu.add_command(label="English", command=lambda: switch_language("en"))
+menubar.add_cascade(label="Language", menu=language_menu)
+root.config(menu=menubar)
+
+score = 0
+score_label = tk.Label(root, text=languages[current_lang]["points"] + str(score), font=("Arial", 12), bg="#ADD8E6")
+score_label.pack()
+
+# Zielsprache auswählen
+target_lang_label = tk.Label(root, text=languages[current_lang]["target_lang"], bg="#ADD8E6")
+target_lang_label.pack()
+target_lang_var = tk.StringVar(value="de")
+target_lang_entry = tk.Entry(root, textvariable=target_lang_var, width=10)
+target_lang_entry.pack()
+
+word_label = tk.Label(root, text=languages[current_lang]["word_input"], bg="#ADD8E6")
+word_label.pack()
+word_entry = tk.Entry(root, width=30)
+word_entry.pack()
+translate_button = tk.Button(root, text=languages[current_lang]["translate_save"], command=add_word)
+translate_button.pack()
+
+learn_label = tk.Label(root, text=languages[current_lang]["learn_words"], bg="#ADD8E6")
+learn_label.pack()
+question_label = tk.Label(root, text=languages[current_lang]["press_start"], font=("Arial", 12), bg="#ADD8E6")
+question_label.pack()
+answer_entry = tk.Entry(root, width=30)
+answer_entry.pack()
+check_button = tk.Button(root, text=languages[current_lang]["check_answer"], command=start_training)
+check_button.pack()
+start_button = tk.Button(root, text=languages[current_lang]["start_learning"], command=start_training)
+start_button.pack()
+
+saved_words_label = tk.Label(root, text=languages[current_lang]["saved_words"], bg="#ADD8E6")
+saved_words_label.pack()
+vocab_table = ttk.Treeview(root, columns=("Wort", "Übersetzung"), show="headings", selectmode="extended")
+vocab_table.heading("Wort", text="Wort")
+vocab_table.heading("Übersetzung", text="Übersetzung")
+vocab_table.pack()
+delete_button = tk.Button(root, text=languages[current_lang]["delete_selected"], command=delete_selected_words)
+delete_button.pack()
+vocab_table.bind("<Delete>", delete_with_key)
+vocabulary = load_vocabulary()
+update_vocab_table()
+root.mainloop()
